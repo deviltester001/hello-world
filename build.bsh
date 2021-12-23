@@ -1,0 +1,383 @@
+// Beanshell script for JavaIDEdroid
+// to compile and build the APK package.
+// Use UTF-8 encoding.
+
+import java.io.*;
+import java.util.ArrayList;
+
+setStrictJava(true);
+
+// global variables
+String testPackage = null; // set to create with TEST package name
+boolean bDexMerging = false; // set JID.stDexlibsDir to use dex merging (PRO only)
+boolean bIsPro = JID.fnGetVersionName().contains("PRO");
+String stPrjRootDir="";
+String msg="";
+String androidJar="";
+String binDir="";
+String dexlibDir="";
+String apk="";
+String keystore="";
+String storepass="";
+String alias="";
+String keypass="";
+String args="";
+File d;
+JID.iScriptResultCode = 0;
+
+// *** functions ***
+
+boolean fnCheckVersion ()
+{
+  boolean ok=false;
+  String pkg = JID.fnGetPackageName();
+  if (JID.fnIsCancelled())
+  {
+    JID.fnToast("Task aborted.",10000);
+    return false;
+  }
+  // check version
+  System.out.println(pkg);
+  System.out.println("Version: "+JID.fnGetVersionName()+" ("+JID.fnGetVersionCode()+")\n");
+  if (pkg.equals("com.t_arn.JavaIDEdroidPRO")) ok=true;
+  if (pkg.equals("ch.tanapro.JavaIDEdroid")) ok=true;
+  if (!ok)
+  {
+    JID.iScriptResultCode = 99;
+    msg = "This script does not work with your version of JavaIDEdroid!";
+    System.out.println(msg);
+    JID.fnToast(msg, 10000);
+    return false;
+  }// if
+  return true;
+}// fnCheckVersion 
+
+boolean fnCheckForCancelled()
+{
+  // check if user has cancelled the process
+  if (JID.fnIsCancelled())
+  {
+    System.out.println("\nTask aborted by user.");
+    JID.fnToast("Task aborted.",10000);
+    return true;
+  }
+  else return false;
+} // fnCheckForCancelled
+
+boolean fnCheckForOpenProject()
+{
+  if (JID.fnIsCancelled())
+  {
+    JID.fnToast("Task aborted.",10000);
+    return false;
+  }
+  // check if the user has opened a project file
+  if (JID.isProjectClosed())
+  {
+    JID.iScriptResultCode = 99;
+    msg = "Please open a project file first!";
+    System.out.println(msg);
+    JID.fnToast(msg, 10000);
+    return false;
+  }// if
+  return true;
+}//fnCheckForOpenProject
+
+void fnSetGlobalVariables()
+{
+  if (fnCheckForCancelled()) return false;
+  // get project root directory
+  stPrjRootDir = JID.stPrjRootDir;
+  
+  // get the correct SDK jar
+  if (JID.stAndroidJarPath.equals("")) androidJar = JID.stDevAndroidJarPath;
+  else 
+  {
+    if (JID.stAndroidJarPath.startsWith("/")) androidJar = JID.stAndroidJarPath;
+    else androidJar = JID.stDevRootDir+JID.stAndroidJarPath;
+  }
+  
+  // set dirs and apk
+  binDir=stPrjRootDir+"bin/test/"+JID.stName+"/";
+  dexlibDir=stPrjRootDir+JID.stDexlibsDir;
+  if (!JID.stDexlibsDir.equals("")) bDexMerging = true;
+  apk=binDir+JID.stName+".apk";
+  if (!JID.stAPK.equals(""))
+  {
+    apk=stPrjRootDir+JID.stAPK;
+    binDir=apk.substring(0,apk.lastIndexOf('/'))+"/";
+  }// if
+  
+  // set variables for custom signing
+  keystore = JID.stBshVar1;
+  storepass = JID.stPw1;
+  alias = JID.stBshVar2; 
+  keypass = JID.stPw2;
+}//fnSetGlobalVariables
+
+boolean fnCreateOutputDirs()
+{
+  boolean rc;
+  
+  if (fnCheckForCancelled()) return false;
+  // check the directories for the output
+  d = new File(binDir+"classes");
+  if (! d.isDirectory())
+  {
+    rc = d.mkdirs();
+    if (rc==false)
+    {
+      JID.iScriptResultCode = 2;
+      msg = "Could not create directory "+binDir;
+      System.out.println(msg);
+      JID.fnToast(msg, 10000);
+      return false;
+    }// if
+  }// if
+  if (bDexMerging)
+  {
+    d = new File(dexlibDir);
+    if (! d.isDirectory())
+    {
+      rc = d.mkdirs();
+      if (rc==false)
+      {
+        JID.iScriptResultCode = 2;
+        msg = "Could not create directory "+dexlibDir;
+        System.out.println(msg);
+        JID.fnToast(msg, 10000);
+        return false;
+      }//if
+    }// if
+  }// if
+  return true;
+}// fnCreateOutputDirs
+
+boolean fnAapt()
+{
+  if (fnCheckForCancelled()) return false;
+  // compile the resources
+  System.out.println("***** Calling Aapt ...");
+  JID.fnPublishStatus("Running Aapt...");
+  args =  "p -m -J \""+stPrjRootDir+"gen\"";
+  if (testPackage!=null) args += " --extra-packages "+testPackage;
+  args += " -M \""+stPrjRootDir+"AndroidManifest.xml\"";
+  args += " -v -S \""+stPrjRootDir+"res\"";
+  if (!JID.stAssetsDir.equals("")) args += " -A \""+stPrjRootDir+JID.stAssetsDir+"\"";
+  args += " -I \""+androidJar+"\"";
+  args += " -f -F \""+binDir+JID.stName+".apk.res\"";
+  JID.iScriptResultCode = JID.fnAapt(args);
+  System.out.println("JID.iScriptResultCode = "+JID.iScriptResultCode);
+  if (JID.iScriptResultCode>0)
+  {
+    JID.fnToast("aapt failed!",10000);
+    return false;
+  }
+  return true;
+}//fnAapt
+
+boolean fnCompile()
+{
+  if (fnCheckForCancelled()) return false;
+  // compile the Java source files
+  System.out.println("\n***** Calling Compiler ...");
+  System.out.println("Compiling "+JID.stMainJava+" ...");
+  JID.fnPublishStatus("Compiling...");
+  args = "-deprecation -1.5";
+  args += " -bootclasspath \""+androidJar+"\"";
+  if (!JID.stLibsDir.equals("")) args += " -extdirs \""+stPrjRootDir+JID.stLibsDir+"\"";
+  args += " -classpath \""+stPrjRootDir+"src";
+  args +=":"+stPrjRootDir+"gen\"";
+  args += " -d \""+binDir+"classes\"";
+  args += " \""+stPrjRootDir+JID.stMainJava+"\"";
+  JID.iScriptResultCode = JID.fnCompile(args);
+  System.out.println("JID.iScriptResultCode = "+JID.iScriptResultCode);
+  if (JID.iScriptResultCode>=2) 
+  {
+    JID.fnToast("Compilation failed!",10000);
+    return false;
+  }
+  else if (JID.iScriptResultCode==1) JID.fnToast("Compilation with warnings",10000);
+  else JID.fnToast("Compilation succeeded.",10000);
+  return true;
+}//fnCompile
+
+boolean fnMakeDexLibs()
+{
+  File[] aFj, aFd;
+  String name, args;
+  int i, idx;
+  boolean bDex;
+  
+  if (fnCheckForCancelled()) return false;
+  System.out.println("\n***** Making dex libraries ...");
+  JID.fnPublishStatus("Making dex libraries...");
+  
+  aFj = new File(stPrjRootDir+JID.stLibsDir).listFiles();
+  aFd = new File(dexlibDir).listFiles();
+  for (i=0;i<aFd.length;i++)
+  {
+    name = aFd[i].getName();
+    if (!name.endsWith(".jar.dex.zip")) 
+    {
+      System.out.println("Deleting "+dexlibDir+name+" (no dex library)");
+      aFd[i].delete();
+    }
+    else
+    {
+      name = name.substring(0,name.length()-8);
+      if (fnIndexOf(aFj,name)==-1)
+      {
+        System.out.println("Deleting "+dexlibDir+name+".dex.zip (no corresponding jar library)");
+        aFd[i].delete();
+      }
+    }
+  }//if
+  aFd = new File(dexlibDir).listFiles();
+  
+  for (i=0;i<aFj.length;i++)
+  {
+    if (JID.fnIsCancelled())
+    {
+      JID.fnToast("Task aborted.",10000);
+      return false;
+    }
+    name = aFj[i].getName();
+    if (!name.endsWith(".jar")) continue;
+    bDex =false;
+    idx = fnIndexOf(aFd,name+".dex.zip");
+    if (idx==-1) bDex=true;
+    else if (aFj[i].lastModified()>aFd[idx].lastModified()) bDex=true;
+    if (bDex==true)
+    {
+      if (bIsPro)
+      {
+        args = "\""+stPrjRootDir+JID.stLibsDir+name+"\"";
+        args += " \""+dexlibDir+name+".dex.zip\"";
+        JID.iScriptResultCode = JID.fnDexJarArchiveIncrementally(args);
+      }
+      else
+      {
+        args =  "--dex --output=\""+dexlibDir+name+".dex.zip\"";
+        args += " \""+stPrjRootDir+JID.stLibsDir+name+"\"";
+        JID.iScriptResultCode = JID.fnDx(args);
+      }
+      if (JID.iScriptResultCode>0)
+      {
+        JID.fnToast("Making dex libraries failed!",10000);
+        return false;
+      }//if
+    }//if
+  }//for
+  return true;
+}//fnMakeDexLibs
+
+int fnIndexOf (File[] aF, String filename)
+{
+  int rc = -1;
+  for (int i=0;i<aF.length;i++)
+  {
+    if (filename.equals(aF[i].getName()))
+    {
+      rc = i;
+      break;
+    }//if
+  }//for
+  return rc;
+}// fnIndexOf
+
+boolean fnDexClasses ()
+{
+  if (fnCheckForCancelled()) return false;
+  // deleting old files
+  new File(binDir+"classes.dex").delete();
+  new File(apk).delete();
+  new File(apk+".unsigned").delete();
+  // running dx
+  System.out.println("\n***** Dexing classes ...");
+  JID.fnPublishStatus("Dexing classes...");
+  args =  "--dex --output=\""+binDir+"classes.dex\"";
+  args += " \""+binDir+"classes\"";
+  if (!JID.stLibsDir.equals(""))
+  { 
+    if (bDexMerging) args += " \""+dexlibDir+"\"";
+    else args += " \""+stPrjRootDir+JID.stLibsDir+"\"";
+  }//if
+  JID.iScriptResultCode = JID.fnDx(args);
+  System.out.println("JID.iScriptResultCode = "+JID.iScriptResultCode);
+  if (JID.iScriptResultCode>0)
+  {
+    JID.fnToast("Dexing failed!",10000);
+    return false;
+  }
+  return true;
+}// fnDexClasses
+
+boolean fnMakeAPK()
+{
+  if (fnCheckForCancelled()) return false;
+  // making APK package
+  System.out.println("\n***** Calling ApkBuilder ...");
+  JID.fnPublishStatus("Running Apkbuilder...");
+
+  args =  "\""+binDir+JID.stName+".apk.unsigned\"";
+  args += " -u -z \""+binDir+JID.stName+".apk.res\""; // signing is not working with apkbuilder
+  args += " -f \""+binDir+"classes.dex\"";
+  args += " -rf \""+stPrjRootDir+"src\"";
+  if (!JID.stLibsDir.equals("")) args += " -rj \""+stPrjRootDir+JID.stLibsDir+"\"";
+  if (!JID.stLibsDir.equals("")) args += " -nf \""+stPrjRootDir+JID.stLibsDir+"\"";
+  JID.iScriptResultCode = JID.fnApkBuilder(args);
+  System.out.println("JID.iScriptResultCode = "+JID.iScriptResultCode);
+  if (JID.iScriptResultCode>0) 
+  {
+    JID.fnToast("apkbuilder failed!",10000);
+    return false;
+  }
+  return true;
+}//fnMakeAPK
+
+boolean fnSignAPK()
+{
+  if (fnCheckForCancelled()) return false;
+  // sign APK package with TEST key
+  System.out.println("\n***** Calling ZipSigner ...");
+  JID.fnPublishStatus("Running ZipSigner...");
+  args  = "-I \""+binDir+JID.stName+".apk.unsigned\"";
+  args += " -O \""+apk+"\""; 
+  if ((JID.stPw1==null) || JID.stPw1.equals(""))
+    args +=  " -M testkey";
+  else
+  {
+    args += " -S "+keystore;
+    args += " -P "+storepass;
+    args += " -A "+alias;
+    args += " -W "+keypass;
+  }
+  JID.iScriptResultCode = JID.fnSignApk(args);
+  System.out.println("JID.iScriptResultCode = "+JID.iScriptResultCode);
+  if (JID.iScriptResultCode>0) 
+  {
+    JID.fnToast("Signing failed!",10000);
+    return false;
+  }
+  else JID.fnToast("Build completed successfully!",10000);
+  return true;
+}// fnSignAPK
+
+
+// *** main script ***
+
+if (!fnCheckVersion()) return;
+if (!fnCheckForOpenProject()) return;
+fnSetGlobalVariables();
+if (!fnCreateOutputDirs()) return;
+if (!fnAapt()) return;
+if (!fnCompile()) return;
+if (bDexMerging)
+{
+  if (!fnMakeDexLibs()) return;
+}
+if (!fnDexClasses()) return;
+if (!fnMakeAPK()) return;
+if (!fnSignAPK()) return;
+return;
